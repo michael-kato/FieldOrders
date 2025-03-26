@@ -1,7 +1,7 @@
 # Exchange settings
 EXCHANGES = {
-    'binance': {
-        'sandbox': True,
+    'mexc': {
+        'sandbox': False,
         'api_key': '',  # Fill in for live testing
         'api_secret': '',  # Fill in for live testing
     }

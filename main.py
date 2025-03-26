@@ -12,11 +12,11 @@ from orders import OrderManager
 from logger import setup_logger
 from storage import Storage
 from alerts import AlertManager, AlertEvent
-from ui import TacticalDashboard
+from ui import SimplifiedDashboard
 
 def parse_args():
     parser = argparse.ArgumentParser(description='OrderTools Trading Bot')
-    parser.add_argument('--exchange', type=str, default='binance', help='Exchange to use')
+    parser.add_argument('--exchange', type=str, default='mexc', help='Exchange to use')
     parser.add_argument('--sandbox', action='store_true', help='Use sandbox mode')
     parser.add_argument('--headless', action='store_true', help='Run without GUI')
     parser.add_argument('--simulate', action='store_true', help='Run in simulation mode')
@@ -247,7 +247,7 @@ def main():
                 'exchange': exchange_settings
             }
             
-            dashboard = TacticalDashboard(scanner, order_manager, settings, storage, alert_manager)
+            dashboard = SimplifiedDashboard(scanner, order_manager, settings, storage, alert_manager)
             dashboard.show()
             
             # Start background thread for checking filled orders

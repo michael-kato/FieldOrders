@@ -54,7 +54,11 @@ class VolatilityScanner:
         try:
             # If no symbols provided, get all
             if symbols is None or len(symbols) == 0:
-                markets = self.connector.get_markets()
+                markets = {k: v for k, v in self.connector.get_markets().items() 
+                          if v.get('quote') == 'USDT' 
+                          and v.get('spot')
+                          and v.get('active') 
+                          and not v.get('info', {}).get('suspended')}
                 symbols = list(markets.keys())
                 
             # Calculate volatility for each symbol

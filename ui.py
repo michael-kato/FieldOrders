@@ -1,8 +1,3 @@
-"""
-OrderTools - Tactical Field Deployment System
-A sci-fi themed UI for crypto trading with the concept of deploying "fields" of orders
-"""
-
 import sys
 import logging
 import time
@@ -11,16 +6,11 @@ from typing import Dict, List, Optional
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
-    QLabel, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, 
-    QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QGroupBox, 
-    QStatusBar, QAction, QToolBar, QTextEdit, QSplitter, QMessageBox, 
-    QInputDialog, QHeaderView
+    QLabel, QPushButton, QTableWidget, QTableWidgetItem, QSpinBox, QDoubleSpinBox,
+    QGroupBox, QHeaderView, QStatusBar
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QDateTime, QSize
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QDateTime
 from PyQt5.QtGui import QColor, QPalette, QFont
-
-from chart import ChartWidget
-
 
 # Color scheme
 COLOR_BG_DARK = "#121212"
@@ -33,13 +23,12 @@ COLOR_DANGER = "#FF1744"
 COLOR_BUY_FIELD = "#00C853"
 COLOR_SELL_FIELD = "#2979FF"
 
-
-class SciFiStyle:
-    """Apply sci-fi styling to the application"""
+class SimplifiedStyle:
+    """Apply simplified styling to the application"""
     
     @staticmethod
     def apply_style(app):
-        """Apply dark sci-fi style to application"""
+        """Apply dark style to application"""
         app.setStyle("Fusion")
         
         # Create dark palette
@@ -77,23 +66,6 @@ class SciFiStyle:
                 color: {COLOR_BG_DARK};
             }}
             
-            QTabWidget::pane {{
-                border: 1px solid {COLOR_ACCENT};
-            }}
-            
-            QTabBar::tab {{
-                background-color: {COLOR_BG_MEDIUM};
-                color: {COLOR_TEXT};
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                padding: 6px 12px;
-            }}
-            
-            QTabBar::tab:selected {{
-                background-color: {COLOR_ACCENT};
-                color: {COLOR_BG_DARK};
-            }}
-            
             QTableView {{
                 gridline-color: {COLOR_ACCENT};
                 border: 1px solid {COLOR_ACCENT};
@@ -119,28 +91,49 @@ class SciFiStyle:
                 padding: 0 5px 0 5px;
                 color: {COLOR_ACCENT};
             }}
+            
+            QSpinBox, QDoubleSpinBox {{
+                background-color: {COLOR_BG_MEDIUM};
+                color: {COLOR_TEXT};
+                border: 1px solid {COLOR_ACCENT};
+                border-radius: 4px;
+                padding: 2px 5px;
+            }}
         """)
 
-
-class VolatilityTable(QTableWidget):
+class VolatilityList(QTableWidget):
     """Table showing volatility scan results"""
+    
+    item_selected = pyqtSignal(str)
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setColumnCount(5)
-        self.setHorizontalHeaderLabels(["Symbol", "Volatility", "Price", "Volume", "Time"])
+        self.setColumnCount(3)
+        self.setHorizontalHeaderLabels(["Symbol", "Volatility", "Price"])
         self.horizontalHeader().setStretchLastSection(True)
         self.setEditTriggers(QTableWidget.NoEditTriggers)
         self.setSortingEnabled(True)
         self.verticalHeader().setVisible(False)
+        self.setSelectionBehavior(QTableWidget.SelectRows)
+        self.setSelectionMode(QTableWidget.SingleSelection)
+        
+        # Connect selection changed
+        self.itemSelectionChanged.connect(self.on_selection_changed)
     
-    def update_data(self, data):
+    def update_data(self, data, active_symbols=None):
         """Update table with volatility scan results"""
         self.setSortingEnabled(False)
         self.setRowCount(len(data))
         
         for row, item in enumerate(data):
-            self.setItem(row, 0, QTableWidgetItem(item['symbol']))
+            symbol_item = QTableWidgetItem(item['symbol'])
+            
+            # Color symbols with active orders
+            if active_symbols and item['symbol'] in active_symbols:
+                symbol_item.setBackground(QColor(COLOR_SUCCESS))
+                symbol_item.setForeground(QColor(COLOR_BG_DARK))
+            
+            self.setItem(row, 0, symbol_item)
             
             # Volatility with coloring
             volatility_value = item['volatility']
@@ -151,53 +144,49 @@ class VolatilityTable(QTableWidget):
                 volatility_item.setBackground(QColor(COLOR_DANGER))
             elif volatility_value >= 8.0:
                 volatility_item.setBackground(QColor(COLOR_WARNING))
-            elif volatility_value >= 5.0:
-                volatility_item.setBackground(QColor(COLOR_SUCCESS))
             
             self.setItem(row, 1, volatility_item)
             
             # Price with precision
             self.setItem(row, 2, QTableWidgetItem(f"{item['last_price']:.8f}"))
-            
-            # Volume
-            self.setItem(row, 3, QTableWidgetItem(f"{item['volume']:.2f}"))
-            
-            # Format timestamp
-            timestamp = item.get('timestamp', 0)
-            dt = QDateTime.fromMSecsSinceEpoch(timestamp)
-            time_str = dt.toString('HH:mm:ss')
-            self.setItem(row, 4, QTableWidgetItem(time_str))
         
         self.setSortingEnabled(True)
         # Sort by volatility by default
         self.sortItems(1, Qt.DescendingOrder)
+    
+    def on_selection_changed(self):
+        """Handle selection change"""
+        selected_items = self.selectedItems()
+        if selected_items:
+            symbol = self.item(selected_items[0].row(), 0).text()
+            self.item_selected.emit(symbol)
 
-
-class FieldsTable(QTableWidget):
-    """Table showing deployed order fields"""
+class ActiveOrdersList(QTableWidget):
+    """Table showing active orders for selected symbol"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setColumnCount(6)
-        self.setHorizontalHeaderLabels([
-            "ID", "Symbol", "Field Type", "Amount", "Price", "Status"
-        ])
+        self.setColumnCount(4)
+        self.setHorizontalHeaderLabels(["Type", "Price", "Amount", "Status"])
         self.horizontalHeader().setStretchLastSection(True)
         self.setEditTriggers(QTableWidget.NoEditTriggers)
         self.setSortingEnabled(True)
         self.verticalHeader().setVisible(False)
     
-    def update_data(self, data):
-        """Update table with fields data"""
-        self.setSortingEnabled(False)
-        self.setRowCount(len(data))
+    def update_data(self, orders, symbol):
+        """Update table with orders for selected symbol"""
+        # Filter orders for the selected symbol
+        filtered_orders = []
+        for order_id, order in orders.items():
+            if order.get('symbol') == symbol:
+                filtered_orders.append(order)
         
-        for row, (order_id, item) in enumerate(data.items()):
-            self.setItem(row, 0, QTableWidgetItem(order_id[:8] + "..."))
-            self.setItem(row, 1, QTableWidgetItem(item.get('symbol', '')))
-            
+        self.setSortingEnabled(False)
+        self.setRowCount(len(filtered_orders))
+        
+        for row, order in enumerate(filtered_orders):
             # Field type with color coding
-            field_type = item.get('field_type', '')
+            field_type = order.get('field_type', '')
             field_type_item = QTableWidgetItem(field_type.upper())
             
             if field_type == 'buy':
@@ -207,14 +196,14 @@ class FieldsTable(QTableWidget):
                 field_type_item.setBackground(QColor(COLOR_SELL_FIELD))
                 field_type_item.setForeground(QColor(COLOR_BG_DARK))
             
-            self.setItem(row, 2, field_type_item)
+            self.setItem(row, 0, field_type_item)
             
-            # Amount, price, status
-            self.setItem(row, 3, QTableWidgetItem(f"{item.get('amount', 0):.8f}"))
-            self.setItem(row, 4, QTableWidgetItem(f"{item.get('price', 0):.8f}"))
+            # Price, amount
+            self.setItem(row, 1, QTableWidgetItem(f"{order.get('price', 0):.8f}"))
+            self.setItem(row, 2, QTableWidgetItem(f"{order.get('amount', 0):.8f}"))
             
-            # Status with color coding
-            status = item.get('status', '')
+            # Status
+            status = order.get('status', '')
             status_item = QTableWidgetItem(status.upper())
             
             if status == 'closed':
@@ -224,128 +213,82 @@ class FieldsTable(QTableWidget):
                 status_item.setBackground(QColor(COLOR_WARNING))
                 status_item.setText("ARMED")
             
-            self.setItem(row, 5, status_item)
+            self.setItem(row, 3, status_item)
         
         self.setSortingEnabled(True)
 
-
-class ActivationsTable(QTableWidget):
-    """Table showing field activations"""
+class FieldConfigPanel(QWidget):
+    """Panel for configuring and placing field orders"""
+    
+    deploy_buy_field = pyqtSignal(str, float, dict)
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setColumnCount(5)
-        self.setHorizontalHeaderLabels([
-            "Symbol", "Field Type", "Amount", "Price", "Time"
-        ])
-        self.horizontalHeader().setStretchLastSection(True)
-        self.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.setSortingEnabled(True)
-        self.verticalHeader().setVisible(False)
-    
-    def update_data(self, data):
-        """Update table with field activations"""
-        self.setSortingEnabled(False)
-        self.setRowCount(len(data))
-        
-        for row, item in enumerate(data):
-            self.setItem(row, 0, QTableWidgetItem(item.get('symbol', '')))
-            
-            # Field type with color coding
-            field_type = item.get('field_type', '')
-            field_type_item = QTableWidgetItem(field_type.upper() + " FIELD")
-            
-            if field_type == 'buy':
-                field_type_item.setBackground(QColor(COLOR_BUY_FIELD))
-                field_type_item.setForeground(QColor(COLOR_BG_DARK))
-            elif field_type == 'sell':
-                field_type_item.setBackground(QColor(COLOR_SELL_FIELD))
-                field_type_item.setForeground(QColor(COLOR_BG_DARK))
-            
-            self.setItem(row, 1, field_type_item)
-            
-            # Amount, price
-            self.setItem(row, 2, QTableWidgetItem(f"{item.get('amount', 0):.8f}"))
-            self.setItem(row, 3, QTableWidgetItem(f"{item.get('price', 0):.8f}"))
-            
-            # Format timestamp
-            timestamp = item.get('timestamp', 0)
-            dt = QDateTime.fromSecsSinceEpoch(int(timestamp / 1000))
-            time_str = dt.toString('yyyy-MM-dd HH:mm:ss')
-            self.setItem(row, 4, QTableWidgetItem(time_str))
-        
-        self.setSortingEnabled(True)
-        # Sort by time (descending)
-        self.sortItems(4, Qt.DescendingOrder)
-
-
-class AlertConsole(QTextEdit):
-    """Console for displaying system alerts"""
-    
-    def __init__(self, alert_manager, parent=None):
-        super().__init__(parent)
-        self.alert_manager = alert_manager
-        self.setReadOnly(True)
-        
-        # Set monospace font for console-like appearance
-        font = QFont("Consolas, Courier New")
-        font.setPointSize(9)
-        self.setFont(font)
-    
-    def update_alerts(self):
-        """Update with recent alerts"""
-        alerts = self.alert_manager.get_recent_alerts(20)
-        
-        # Format alerts
-        console_text = ""
-        for alert in alerts:
-            # Format timestamp
-            timestamp = alert.get('timestamp', 0)
-            dt = QDateTime.fromSecsSinceEpoch(int(timestamp))
-            time_str = dt.toString('HH:mm:ss')
-            
-            # Get message
-            alert_type = alert.get('type', '').replace('_', ' ').upper()
-            data = alert.get('data', {})
-            message = self.alert_manager._format_alert_message(alert.get('type', ''), data)
-            
-            # Add colored message based on type
-            if "buy field" in message.lower():
-                console_text += f'<span style="color:{COLOR_BUY_FIELD};">[{time_str}] {message}</span><br>'
-            elif "sell field" in message.lower():
-                console_text += f'<span style="color:{COLOR_SELL_FIELD};">[{time_str}] {message}</span><br>'
-            elif "volatility" in message.lower():
-                console_text += f'<span style="color:{COLOR_WARNING};">[{time_str}] {message}</span><br>'
-            elif "error" in message.lower():
-                console_text += f'<span style="color:{COLOR_DANGER};">[{time_str}] {message}</span><br>'
-            else:
-                console_text += f'<span style="color:{COLOR_TEXT};">[{time_str}] {message}</span><br>'
-        
-        self.setHtml(console_text)
-        
-        # Scroll to bottom
-        scrollbar = self.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
-
-
-class ControlPanel(QWidget):
-    """Panel for controlling field deployment"""
-    
-    deploy_signal = pyqtSignal()
-    retract_signal = pyqtSignal()
-    settings_signal = pyqtSignal(dict)
-    
-    def __init__(self, settings, parent=None):
-        super().__init__(parent)
-        self.settings = settings
+        self.selected_symbol = ""
+        self.current_price = 0.0
         
         # Create layout
         layout = QVBoxLayout()
         
-        # Control buttons
-        button_layout = QHBoxLayout()
+        # Buy field config
+        buy_group = QGroupBox("Buy Field Configuration")
+        buy_layout = QGridLayout()
         
-        self.deploy_button = QPushButton("DEPLOY FIELD ARRAY")
+        buy_layout.addWidget(QLabel("Number of Orders:"), 0, 0)
+        self.buy_orders_spin = QSpinBox()
+        self.buy_orders_spin.setRange(1, 10)
+        self.buy_orders_spin.setValue(3)
+        buy_layout.addWidget(self.buy_orders_spin, 0, 1)
+        
+        buy_layout.addWidget(QLabel("Start Discount (%):"), 1, 0)
+        self.buy_start_spin = QDoubleSpinBox()
+        self.buy_start_spin.setRange(0.1, 30.0)
+        self.buy_start_spin.setValue(5.0)
+        buy_layout.addWidget(self.buy_start_spin, 1, 1)
+        
+        buy_layout.addWidget(QLabel("End Discount (%):"), 2, 0)
+        self.buy_end_spin = QDoubleSpinBox()
+        self.buy_end_spin.setRange(0.1, 50.0)
+        self.buy_end_spin.setValue(15.0)
+        buy_layout.addWidget(self.buy_end_spin, 2, 1)
+        
+        buy_layout.addWidget(QLabel("Position Size (USD):"), 3, 0)
+        self.position_size_spin = QDoubleSpinBox()
+        self.position_size_spin.setRange(10.0, 1000.0)
+        self.position_size_spin.setValue(100.0)
+        buy_layout.addWidget(self.position_size_spin, 3, 1)
+        
+        buy_group.setLayout(buy_layout)
+        layout.addWidget(buy_group)
+        
+        # Sell field config
+        sell_group = QGroupBox("Sell Field Configuration (Auto)")
+        sell_layout = QGridLayout()
+        
+        sell_layout.addWidget(QLabel("Number of Orders:"), 0, 0)
+        self.sell_orders_spin = QSpinBox()
+        self.sell_orders_spin.setRange(1, 10)
+        self.sell_orders_spin.setValue(3)
+        sell_layout.addWidget(self.sell_orders_spin, 0, 1)
+        
+        sell_layout.addWidget(QLabel("Start Profit (%):"), 1, 0)
+        self.sell_start_spin = QDoubleSpinBox()
+        self.sell_start_spin.setRange(0.1, 30.0)
+        self.sell_start_spin.setValue(5.0)
+        sell_layout.addWidget(self.sell_start_spin, 1, 1)
+        
+        sell_layout.addWidget(QLabel("End Profit (%):"), 2, 0)
+        self.sell_end_spin = QDoubleSpinBox()
+        self.sell_end_spin.setRange(0.1, 100.0)
+        self.sell_end_spin.setValue(15.0)
+        sell_layout.addWidget(self.sell_end_spin, 2, 1)
+        
+        sell_group.setLayout(sell_layout)
+        layout.addWidget(sell_group)
+        
+        # Deploy button
+        self.deploy_button = QPushButton("DEPLOY FIELD")
+        self.deploy_button.setEnabled(False)
         self.deploy_button.setMinimumHeight(40)
         self.deploy_button.setStyleSheet(f"""
             QPushButton {{
@@ -358,156 +301,50 @@ class ControlPanel(QWidget):
                 background-color: {COLOR_BUY_FIELD};
                 color: {COLOR_BG_DARK};
             }}
-        """)
-        
-        self.retract_button = QPushButton("RETRACT FIELD ARRAY")
-        self.retract_button.setMinimumHeight(40)
-        self.retract_button.setEnabled(False)
-        self.retract_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLOR_BG_MEDIUM};
-                color: {COLOR_DANGER};
-                border: 2px solid {COLOR_DANGER};
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {COLOR_DANGER};
-                color: {COLOR_BG_DARK};
-            }}
             QPushButton:disabled {{
                 color: #666666;
                 border: 2px solid #666666;
             }}
         """)
+        layout.addWidget(self.deploy_button)
         
-        button_layout.addWidget(self.deploy_button)
-        button_layout.addWidget(self.retract_button)
-        layout.addLayout(button_layout)
-        
-        # Scanner settings
-        scanner_group = QGroupBox("Scanner Settings")
-        scanner_layout = QGridLayout()
-        
-        scanner_layout.addWidget(QLabel("Volatility Threshold (%):"), 0, 0)
-        self.volatility_spin = QDoubleSpinBox()
-        self.volatility_spin.setRange(0.1, 100.0)
-        self.volatility_spin.setValue(settings['scanner'].get('min_volatility', 5.0))
-        scanner_layout.addWidget(self.volatility_spin, 0, 1)
-        
-        scanner_layout.addWidget(QLabel("Scan Window (minutes):"), 1, 0)
-        self.window_spin = QSpinBox()
-        self.window_spin.setRange(1, 1440)
-        self.window_spin.setValue(settings['scanner'].get('window_size', 60))
-        scanner_layout.addWidget(self.window_spin, 1, 1)
-        
-        scanner_layout.addWidget(QLabel("Scan Interval (sec):"), 2, 0)
-        self.interval_spin = QSpinBox()
-        self.interval_spin.setRange(5, 3600)
-        self.interval_spin.setValue(settings['scanner'].get('scan_interval', 300))
-        scanner_layout.addWidget(self.interval_spin, 2, 1)
-        
-        scanner_group.setLayout(scanner_layout)
-        layout.addWidget(scanner_group)
-        
-        # Field settings
-        field_group = QGroupBox("Field Configuration")
-        field_layout = QGridLayout()
-        
-        field_layout.addWidget(QLabel("Buy Field Discount (%):"), 0, 0)
-        self.discount_spin = QDoubleSpinBox()
-        self.discount_spin.setRange(1.0, 50.0)
-        self.discount_spin.setValue(settings['order'].get('discount_percentage', 15.0))
-        field_layout.addWidget(self.discount_spin, 0, 1)
-        
-        field_layout.addWidget(QLabel("Max Field Size (USD):"), 1, 0)
-        self.max_size_spin = QDoubleSpinBox()
-        self.max_size_spin.setRange(10.0, 10000.0)
-        self.max_size_spin.setValue(settings['order'].get('max_position_size', 100.0))
-        field_layout.addWidget(self.max_size_spin, 1, 1)
-        
-        # Profit tiers
-        field_layout.addWidget(QLabel("Sell Field Tiers (%):"), 2, 0)
-        
-        tier_layout = QHBoxLayout()
-        
-        self.tier1_spin = QDoubleSpinBox()
-        self.tier1_spin.setRange(0.1, 100.0)
-        self.tier1_spin.setValue(settings['order'].get('profit_tiers', [5.0, 10.0, 15.0])[0])
-        tier_layout.addWidget(QLabel("Tier 1:"))
-        tier_layout.addWidget(self.tier1_spin)
-        
-        self.tier2_spin = QDoubleSpinBox()
-        self.tier2_spin.setRange(0.1, 100.0)
-        self.tier2_spin.setValue(settings['order'].get('profit_tiers', [5.0, 10.0, 15.0])[1])
-        tier_layout.addWidget(QLabel("Tier 2:"))
-        tier_layout.addWidget(self.tier2_spin)
-        
-        self.tier3_spin = QDoubleSpinBox()
-        self.tier3_spin.setRange(0.1, 100.0)
-        self.tier3_spin.setValue(settings['order'].get('profit_tiers', [5.0, 10.0, 15.0])[2])
-        tier_layout.addWidget(QLabel("Tier 3:"))
-        tier_layout.addWidget(self.tier3_spin)
-        
-        field_layout.addLayout(tier_layout, 2, 1)
-        
-        # Apply button
-        self.apply_button = QPushButton("APPLY CONFIGURATION")
-        field_layout.addWidget(self.apply_button, 3, 0, 1, 2)
-        
-        field_group.setLayout(field_layout)
-        layout.addWidget(field_group)
+        # Add stretch
+        layout.addStretch()
         
         # Set main layout
         self.setLayout(layout)
         
         # Connect signals
-        self.deploy_button.clicked.connect(self.on_deploy)
-        self.retract_button.clicked.connect(self.on_retract)
-        self.apply_button.clicked.connect(self.on_apply_settings)
+        self.deploy_button.clicked.connect(self.on_deploy_field)
     
-    def on_deploy(self):
+    def set_selected_symbol(self, symbol, price):
+        """Set selected symbol and enable/disable deploy button"""
+        self.selected_symbol = symbol
+        self.current_price = price
+        self.deploy_button.setEnabled(bool(symbol))
+    
+    def on_deploy_field(self):
         """Handle deploy button click"""
-        self.deploy_button.setEnabled(False)
-        self.retract_button.setEnabled(True)
-        self.deploy_signal.emit()
-    
-    def on_retract(self):
-        """Handle retract button click"""
-        self.deploy_button.setEnabled(True)
-        self.retract_button.setEnabled(False)
-        self.retract_signal.emit()
-    
-    def on_apply_settings(self):
-        """Apply settings"""
-        # Get profit tiers
-        profit_tiers = [
-            self.tier1_spin.value(),
-            self.tier2_spin.value(),
-            self.tier3_spin.value()
-        ]
+        if not self.selected_symbol:
+            return
         
-        settings = {
-            'scanner': {
-                'min_volatility': self.volatility_spin.value(),
-                'window_size': self.window_spin.value(),
-                'scan_interval': self.interval_spin.value()
-            },
-            'order': {
-                'discount_percentage': self.discount_spin.value(),
-                'max_position_size': self.max_size_spin.value(),
-                'profit_tiers': profit_tiers,
-                'tier_percentages': [0.5, 0.3, 0.2]  # Default
-            },
-            'exchange': self.settings['exchange']  # Keep existing exchange settings
+        # Get field configuration
+        config = {
+            'buy_orders': self.buy_orders_spin.value(),
+            'buy_start': self.buy_start_spin.value(),
+            'buy_end': self.buy_end_spin.value(),
+            'sell_orders': self.sell_orders_spin.value(),
+            'sell_start': self.sell_start_spin.value(),
+            'sell_end': self.sell_end_spin.value()
         }
         
-        self.settings_signal.emit(settings)
+        # Emit signal with symbol, position size, and config
+        self.deploy_buy_field.emit(self.selected_symbol, self.position_size_spin.value(), config)
 
-
-class TacticalDashboard(QMainWindow):
-    """Main application window with sci-fi tactical UI"""
+class SimplifiedDashboard(QMainWindow):
+    """Main application window with simplified UI"""
     
-    def __init__(self, scanner, order_manager, settings, storage, alert_manager):
+    def __init__(self, scanner, order_manager, settings, storage=None, alert_manager=None):
         super().__init__()
         self.scanner = scanner
         self.order_manager = order_manager
@@ -516,179 +353,75 @@ class TacticalDashboard(QMainWindow):
         self.alert_manager = alert_manager
         self.logger = logging.getLogger(__name__)
         self.is_running = False
+        self.selected_symbol = ""
+        self.selected_price = 0.0
         
         self.init_ui()
         
         # Setup timer for updates
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_data)
-        self.timer.start(settings['gui'].get('update_interval', 1000))
-        
-        # Register for alerts
-        self.alert_manager.register_callback("order_filled", self.on_order_filled)
-        self.alert_manager.register_callback("high_volatility", self.on_high_volatility)
+        self.timer.start(settings.get('gui', {}).get('update_interval', 1000))
     
     def init_ui(self):
         """Initialize UI components"""
-        self.setWindowTitle("OrderTools - Tactical Field System")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setWindowTitle("FieldOrders - Simplified UI")
+        self.setGeometry(100, 100, 900, 600)
         
         # Create central widget and main layout
         central_widget = QWidget()
-        main_layout = QVBoxLayout()
+        main_layout = QHBoxLayout()
         
-        # Create splitter for top/bottom sections
-        splitter = QSplitter(Qt.Vertical)
+        # Left side: Volatility list (1/3 width)
+        left_layout = QVBoxLayout()
+        left_layout.addWidget(QLabel("Volatile Pairs"))
         
-        # Top section (chart & control panel)
-        top_widget = QWidget()
-        top_layout = QHBoxLayout()
+        self.volatility_list = VolatilityList()
+        self.volatility_list.item_selected.connect(self.on_symbol_selected)
+        left_layout.addWidget(self.volatility_list)
         
-        # Chart (2/3 width)
-        self.chart = ChartWidget()
+        left_widget = QWidget()
+        left_widget.setLayout(left_layout)
         
-        # Control panel (1/3 width)
-        self.control_panel = ControlPanel(self.settings)
+        # Center: Active orders for selected pair (1/3 width)
+        center_layout = QVBoxLayout()
+        center_layout.addWidget(QLabel("Active Orders"))
         
-        top_layout.addWidget(self.chart, 2)
-        top_layout.addWidget(self.control_panel, 1)
-        top_widget.setLayout(top_layout)
+        self.orders_list = ActiveOrdersList()
+        center_layout.addWidget(self.orders_list)
         
-        # Bottom section (tabs)
-        bottom_widget = QWidget()
-        bottom_layout = QVBoxLayout()
+        center_widget = QWidget()
+        center_widget.setLayout(center_layout)
         
-        tabs = QTabWidget()
+        # Right side: Field configuration panel (1/3 width)
+        self.config_panel = FieldConfigPanel()
+        self.config_panel.deploy_buy_field.connect(self.on_deploy_buy_field)
         
-        # Volatility tab
-        volatility_tab = QWidget()
-        volatility_layout = QVBoxLayout()
-        self.volatility_table = VolatilityTable()
-        volatility_layout.addWidget(self.volatility_table)
-        volatility_tab.setLayout(volatility_layout)
-        tabs.addTab(volatility_tab, "TACTICAL SCANNER")
+        # Add widgets to main layout with equal width
+        main_layout.addWidget(left_widget, 1)
+        main_layout.addWidget(center_widget, 1)
+        main_layout.addWidget(self.config_panel, 1)
         
-        # Fields tab
-        fields_tab = QWidget()
-        fields_layout = QVBoxLayout()
-        self.fields_table = FieldsTable()
-        fields_layout.addWidget(self.fields_table)
-        fields_tab.setLayout(fields_layout)
-        tabs.addTab(fields_tab, "ACTIVE FIELDS")
-        
-        # Activations tab
-        activations_tab = QWidget()
-        activations_layout = QVBoxLayout()
-        self.activations_table = ActivationsTable()
-        activations_layout.addWidget(self.activations_table)
-        activations_tab.setLayout(activations_layout)
-        tabs.addTab(activations_tab, "FIELD ACTIVATIONS")
-        
-        # Alerts console tab
-        alerts_tab = QWidget()
-        alerts_layout = QVBoxLayout()
-        self.alerts_console = AlertConsole(self.alert_manager)
-        
-        # Add clear button
-        clear_button = QPushButton("CLEAR CONSOLE")
-        clear_button.clicked.connect(self.alerts_console.clear)
-        
-        alerts_layout.addWidget(self.alerts_console)
-        alerts_layout.addWidget(clear_button)
-        alerts_tab.setLayout(alerts_layout)
-        tabs.addTab(alerts_tab, "COMMAND CONSOLE")
-        
-        bottom_layout.addWidget(tabs)
-        bottom_widget.setLayout(bottom_layout)
-        
-        # Add to splitter
-        splitter.addWidget(top_widget)
-        splitter.addWidget(bottom_widget)
-        splitter.setSizes([350, 450])  # Proportions: ~40% top, ~60% bottom
-        
-        main_layout.addWidget(splitter)
         central_widget.setLayout(main_layout)
         self.setCentralWidget(central_widget)
         
-        # Status bar
-        self.statusBar().showMessage("System Ready")
+        # Start/Stop button in status bar
+        self.statusBar().showMessage("Scanner Ready")
         
-        # Create menu and toolbar
-        self.create_menu()
-        self.create_toolbar()
-        
-        # Connect signals
-        self.control_panel.deploy_signal.connect(self.start_scanner)
-        self.control_panel.retract_signal.connect(self.stop_scanner)
-        self.control_panel.settings_signal.connect(self.apply_settings)
+        self.scan_button = QPushButton("START SCANNER")
+        self.scan_button.clicked.connect(self.toggle_scanner)
+        self.statusBar().addPermanentWidget(self.scan_button)
     
-    def create_menu(self):
-        """Create menu bar"""
-        menu_bar = self.menuBar()
+    def toggle_scanner(self):
+        """Toggle scanner on/off"""
+        self.is_running = not self.is_running
         
-        # Tactical menu
-        tactical_menu = menu_bar.addMenu("Tactical")
-        
-        deploy_action = QAction("Deploy Field Array", self)
-        deploy_action.triggered.connect(self.start_scanner)
-        tactical_menu.addAction(deploy_action)
-        
-        retract_action = QAction("Retract Field Array", self)
-        retract_action.triggered.connect(self.stop_scanner)
-        tactical_menu.addAction(retract_action)
-        
-        tactical_menu.addSeparator()
-        
-        export_action = QAction("Export Data", self)
-        export_action.triggered.connect(self.export_field_data)
-        tactical_menu.addAction(export_action)
-        
-        tactical_menu.addSeparator()
-        
-        exit_action = QAction("Exit", self)
-        exit_action.triggered.connect(self.close)
-        tactical_menu.addAction(exit_action)
-        
-        # View menu
-        view_menu = menu_bar.addMenu("View")
-        
-        price_chart_action = QAction("Price Chart", self)
-        price_chart_action.triggered.connect(self.chart.show_price_chart)
-        view_menu.addAction(price_chart_action)
-        
-        candle_chart_action = QAction("Candlestick Chart", self)
-        candle_chart_action.triggered.connect(self.chart.show_candlestick_chart)
-        view_menu.addAction(candle_chart_action)
-        
-        # Help menu
-        help_menu = menu_bar.addMenu("Help")
-        
-        manual_action = QAction("Field Manual", self)
-        manual_action.triggered.connect(self.show_manual)
-        help_menu.addAction(manual_action)
-    
-    def create_toolbar(self):
-        """Create toolbar"""
-        toolbar = QToolBar()
-        self.addToolBar(toolbar)
-        
-        deploy_action = QAction("DEPLOY FIELDS", self)
-        deploy_action.triggered.connect(self.start_scanner)
-        toolbar.addAction(deploy_action)
-        
-        retract_action = QAction("RETRACT FIELDS", self)
-        retract_action.triggered.connect(self.stop_scanner)
-        toolbar.addAction(retract_action)
-        
-        toolbar.addSeparator()
-        
-        price_chart_action = QAction("PRICE CHART", self)
-        price_chart_action.triggered.connect(self.chart.show_price_chart)
-        toolbar.addAction(price_chart_action)
-        
-        candle_chart_action = QAction("CANDLESTICK", self)
-        candle_chart_action.triggered.connect(self.chart.show_candlestick_chart)
-        toolbar.addAction(candle_chart_action)
+        if self.is_running:
+            self.scan_button.setText("STOP SCANNER")
+            self.statusBar().showMessage("Scanner Running")
+        else:
+            self.scan_button.setText("START SCANNER")
+            self.statusBar().showMessage("Scanner Stopped")
     
     def update_data(self):
         """Update data in all components"""
@@ -696,205 +429,162 @@ class TacticalDashboard(QMainWindow):
             return
             
         try:
-            # Update volatility table
+            # Get all active orders
+            all_orders = {}
+            all_orders.update(self.order_manager.get_buy_field_orders())
+            all_orders.update(self.order_manager.get_sell_field_orders())
+            
+            # Get active symbols
+            active_symbols = set(order.get('symbol', '') for order in all_orders.values())
+            
+            # Update volatility list
             volatile_pairs = self.scanner.scan_market()
-            self.volatility_table.update_data(volatile_pairs)
+            self.volatility_list.update_data(volatile_pairs, active_symbols)
             
-            # Update fields table
-            all_fields = {}
-            all_fields.update(self.order_manager.get_buy_field_orders())
-            all_fields.update(self.order_manager.get_sell_field_orders())
-            self.fields_table.update_data(all_fields)
-            
-            # Update activations table
-            trades = self.storage.get_trades(limit=100)
-            self.activations_table.update_data(trades)
-            
-            # Update alerts console
-            self.alerts_console.update_alerts()
-            
-            # Save volatility data
-            if volatile_pairs:
-                for pair in volatile_pairs:
-                    self.storage.save_volatility({
-                        'symbol': pair['symbol'],
-                        'volatility': pair['volatility'],
-                        'price': pair['last_price'],
-                        'timestamp': pair['timestamp']
-                    })
-            
-            # Update chart if we have volatile pairs
-            if volatile_pairs:
-                # Select first pair for chart
-                pair = volatile_pairs[0]
-                symbol = pair['symbol']
-                
-                # Set chart title
-                self.chart.set_chart_title(f"{symbol} - Volatility: {pair['volatility']:.2f}%")
-                
-                # Get OHLCV data for candlestick chart
-                ohlcv = self.scanner.connector.get_ohlcv(symbol, '1m', 60)
-                
-                if ohlcv:
-                    # Format data for chart
-                    candles = []
-                    timestamps = []
-                    prices = []
-                    volatility_data = []
-                    vol_timestamps = []
-                    
-                    for i, candle in enumerate(ohlcv):
-                        timestamp, open_price, high, low, close, volume = candle
-                        
-                        candles.append({
-                            'timestamp': timestamp,
-                            'open': open_price,
-                            'high': high,
-                            'low': low,
-                            'close': close
-                        })
-                        
-                        timestamps.append(timestamp)
-                        prices.append(close)
-                        
-                        # Calculate volatility for each candle
-                        if i > 0:
-                            vol = ((high - low) / low) * 100
-                            volatility_data.append(vol)
-                            vol_timestamps.append(timestamp)
-                    
-                    # Update charts
-                    self.chart.update_candlestick_data(candles)
-                    self.chart.update_price_data(timestamps, prices)
-                    
-                    if volatility_data:
-                        self.chart.update_volatility_data(vol_timestamps, volatility_data)
+            # Update orders list for selected symbol
+            if self.selected_symbol:
+                self.orders_list.update_data(all_orders, self.selected_symbol)
             
             # Update status bar
-            self.statusBar().showMessage(f"Field Array Active | Last Update: {time.strftime('%H:%M:%S')}")
+            self.statusBar().showMessage(f"Scanner Running | Last Update: {time.strftime('%H:%M:%S')}")
             
         except Exception as e:
             self.logger.error(f"Error updating data: {str(e)}")
             self.statusBar().showMessage(f"Error: {str(e)}")
     
-    def start_scanner(self):
-        """Start scanner and deploy fields"""
-        self.is_running = True
-        self.statusBar().showMessage("Field Array Deployed")
-    
-    def stop_scanner(self):
-        """Stop scanner and retract fields"""
-        self.is_running = False
-        self.statusBar().showMessage("Field Array Retracted")
-    
-    def apply_settings(self, new_settings):
-        """Apply new field settings"""
-        # Update scanner settings
-        self.scanner.min_volatility = new_settings['scanner']['min_volatility']
-        self.scanner.window_size = new_settings['scanner']['window_size']
+    def on_symbol_selected(self, symbol):
+        """Handle symbol selection"""
+        self.selected_symbol = symbol
         
-        # Update order manager settings
-        self.order_manager.discount_percentage = new_settings['order']['discount_percentage']
-        self.order_manager.profit_tiers = new_settings['order']['profit_tiers']
+        # Find price for selected symbol
+        volatile_pairs = self.scanner.scan_market()
+        for pair in volatile_pairs:
+            if pair['symbol'] == symbol:
+                self.selected_price = pair['last_price']
+                break
         
-        # Update other settings
-        self.settings.update(new_settings)
+        # Update orders list
+        all_orders = {}
+        all_orders.update(self.order_manager.get_buy_field_orders())
+        all_orders.update(self.order_manager.get_sell_field_orders())
+        self.orders_list.update_data(all_orders, symbol)
         
-        # Save settings to storage
-        self.storage.save_setting('scanner', new_settings['scanner'])
-        self.storage.save_setting('order', new_settings['order'])
-        self.storage.save_setting('exchange', new_settings['exchange'])
-        
-        self.statusBar().showMessage("Field Configuration Updated")
+        # Update field panel
+        self.config_panel.set_selected_symbol(symbol, self.selected_price)
     
-    def on_order_filled(self, data):
-        """Handle order filled alert"""
-        # Refresh data
-        self.update_data()
-    
-    def on_high_volatility(self, data):
-        """Handle high volatility alert"""
-        # Switch to volatility tab
-        tabs = self.findChild(QTabWidget)
-        if tabs:
-            tabs.setCurrentIndex(0)  # Volatility tab
+    def on_deploy_buy_field(self, symbol, position_size, config):
+        """Handle deploy buy field signal"""
+        if not symbol:
+            return
         
-        # Refresh data
-        self.update_data()
-    
-    def export_field_data(self):
-        """Export field activation data to CSV file"""
         try:
-            # Generate filename with timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filepath = f"data/export/field_activations_{timestamp}.csv"
+            # Calculate price spread for buy orders
+            buy_orders = config['buy_orders']
+            buy_start = config['buy_start']
+            buy_end = config['buy_end']
             
-            if self.storage.export_trades_csv(filepath):
-                QMessageBox.information(self, "Export Successful", 
-                                      f"Field activation data exported to {filepath}")
-            else:
-                QMessageBox.warning(self, "Export Failed", 
-                                  "Failed to export field activation data")
+            # Save sell field config for when buy orders are filled
+            sell_config = {
+                'orders': config['sell_orders'],
+                'start': config['sell_start'],
+                'end': config['sell_end']
+            }
+            
+            # Deploy multiple buy field orders
+            if buy_orders > 1:
+                # Calculate price steps
+                buy_step = (buy_end - buy_start) / (buy_orders - 1) if buy_orders > 1 else 0
+                order_size = position_size / buy_orders
                 
-        except Exception as e:
-            self.logger.error(f"Error exporting field data: {str(e)}")
-            QMessageBox.critical(self, "Export Error", str(e))
-    
-    def show_manual(self):
-        """Show field manual dialog"""
-        manual_text = """
-        <h2>TACTICAL FIELD ARRAY MANUAL</h2>
-        
-        <h3>OVERVIEW</h3>
-        <p>The Field Deployment System allows you to place strategic order fields across price territories. These fields act like landmines, waiting to be triggered by price movements.</p>
-        
-        <h3>FIELD TYPES</h3>
-        <ul>
-            <li><b>BUY FIELDS:</b> Deployed below market price to capture price drops</li>
-            <li><b>SELL FIELDS:</b> Deployed after buy field activation to secure profits</li>
-        </ul>
-        
-        <h3>OPERATIONS</h3>
-        <ol>
-            <li>Configure volatility threshold and field parameters</li>
-            <li>Deploy field array using the DEPLOY button</li>
-            <li>Monitor field activations in the console</li>
-            <li>Retract fields when tactical objectives are complete</li>
-        </ol>
-        """
-        
-        msg_box = QMessageBox()
-        msg_box.setWindowTitle("Field Array Manual")
-        msg_box.setTextFormat(Qt.RichText)
-        msg_box.setText(manual_text)
-        msg_box.setIcon(QMessageBox.Information)
-        msg_box.exec_()
-    
-    def closeEvent(self, event):
-        """Handle window close event"""
-        if self.is_running:
-            reply = QMessageBox.question(self, 'Confirm Exit',
-                "Field Array is active. Do you want to exit?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            
-            if reply == QMessageBox.Yes:
-                event.accept()
+                orders_placed = 0
+                for i in range(buy_orders):
+                    discount = buy_start + (i * buy_step)
+                    buy_price = self.selected_price * (1 - (discount / 100))
+                    
+                    order = self.order_manager.place_buy_field(symbol, self.selected_price, order_size)
+                    
+                    if order and 'id' in order:
+                        # Store sell field config for this order
+                        if self.storage:
+                            self.storage.save_setting(f"sell_config_{order['id']}", sell_config)
+                        
+                        orders_placed += 1
+                
+                self.statusBar().showMessage(f"Deployed {orders_placed} buy orders for {symbol}")
             else:
-                event.ignore()
-        else:
-            event.accept()
-
-
-def run_tactical_interface(scanner, order_manager, settings, storage, alert_manager):
-    """Run the tactical interface application"""
-    app = QApplication(sys.argv)
+                # Single buy field order
+                buy_price = self.selected_price * (1 - (buy_start / 100))
+                order = self.order_manager.place_buy_field(symbol, self.selected_price, position_size)
+                
+                if order and 'id' in order:
+                    # Store sell field config for this order
+                    if self.storage:
+                        self.storage.save_setting(f"sell_config_{order['id']}", sell_config)
+                    
+                    self.statusBar().showMessage(f"Deployed buy field for {symbol} at {buy_price:.8f}")
+                else:
+                    self.statusBar().showMessage(f"Failed to deploy buy field for {symbol}")
+            
+            # Refresh data
+            self.update_data()
+            
+        except Exception as e:
+            self.logger.error(f"Error deploying buy field: {str(e)}")
+            self.statusBar().showMessage(f"Error: {str(e)}")
     
-    # Apply sci-fi styling
-    SciFiStyle.apply_style(app)
-    
-    # Create and show main window
-    main_window = TacticalDashboard(scanner, order_manager, settings, storage, alert_manager)
-    main_window.show()
-    
-    # Run application
-    sys.exit(app.exec_())
+    def deploy_multi_sell_field(self, buy_order_id):
+        """Deploy multiple sell field orders based on configuration"""
+        try:
+            # Get order details
+            buy_order = self.order_manager.active_orders.get(buy_order_id)
+            if not buy_order:
+                return []
+            
+            # Get sell field configuration for this order
+            sell_config = None
+            if self.storage:
+                sell_config = self.storage.get_setting(f"sell_config_{buy_order_id}")
+            
+            if not sell_config:
+                # Use default sell field configuration
+                sell_config = {
+                    'orders': 3,
+                    'start': 5.0,
+                    'end': 15.0
+                }
+            
+            # Calculate custom profit tiers
+            orders = sell_config['orders']
+            start = sell_config['start']
+            end = sell_config['end']
+            
+            # Generate profit tiers
+            if orders > 1:
+                step = (end - start) / (orders - 1)
+                profit_tiers = [start + (i * step) for i in range(orders)]
+            else:
+                profit_tiers = [start]
+            
+            # Generate percentages (equal distribution)
+            tier_percentages = [1.0 / orders] * orders
+            
+            # Save original tiers
+            original_tiers = self.order_manager.profit_tiers
+            original_percentages = self.order_manager.tier_percentages
+            
+            # Set custom tiers
+            self.order_manager.profit_tiers = profit_tiers
+            self.order_manager.tier_percentages = tier_percentages
+            
+            # Deploy sell field
+            sell_orders = self.order_manager.deploy_sell_field(buy_order_id)
+            
+            # Restore original tiers
+            self.order_manager.profit_tiers = original_tiers
+            self.order_manager.tier_percentages = original_percentages
+            
+            return sell_orders
+            
+        except Exception as e:
+            self.logger.error(f"Error deploying multi sell field: {str(e)}")
+            return []
