@@ -36,31 +36,27 @@ class AlertManager(QObject):
         # Setup tray icon if notifications enabled
         self.tray_icon = None
         if enable_notifications:
-            self.setup_tray_icon()
+            pass#self.setup_tray_icon()
     
     def setup_tray_icon(self):
         """Setup system tray icon for notifications"""
-        try:
-            # This would typically use an actual icon file
-            # For now we'll just create an empty icon
-            # self.tray_icon = QSystemTrayIcon(QIcon("icons/ordertools.png"))
-            self.tray_icon = QSystemTrayIcon()
-            self.tray_icon.setToolTip("OrderTools Trading Bot")
-            
-            # Create menu
-            menu = QMenu()
-            show_action = QAction("Show", menu)
-            quit_action = QAction("Quit", menu)
-            menu.addAction(show_action)
-            menu.addAction(quit_action)
-            self.tray_icon.setContextMenu(menu)
-            
-            # Show icon
-            self.tray_icon.show()
-            
-        except Exception as e:
-            self.logger.error(f"Error setting up tray icon: {str(e)}")
-            self.enable_notifications = False
+        # This would typically use an actual icon file
+        # For now we'll just create an empty icon
+        # self.tray_icon = QSystemTrayIcon(QIcon("icons/ordertools.png"))
+        self.tray_icon = QSystemTrayIcon()
+        self.tray_icon.setToolTip("OrderTools Trading Bot")
+        
+        # Create menu
+        menu = QMenu()
+        show_action = QAction("Show", menu)
+        quit_action = QAction("Quit", menu)
+        menu.addAction(show_action)
+        menu.addAction(quit_action)
+        self.tray_icon.setContextMenu(menu)
+        
+        # Show icon
+        self.tray_icon.show()
+
     
     def register_callback(self, event_type: str, callback: Callable) -> bool:
         """
@@ -129,14 +125,13 @@ class AlertManager(QObject):
     def _format_alert_message(self, event_type: str, data: Dict) -> str:
         """Format alert message for notification"""
         if event_type == AlertEvent.ORDER_PLACED:
-            return f"Buy order placed for {data.get('symbol', 'unknown')} at {data.get('price', 0)}"
+            return f"Buy field deployed for {data.get('symbol', 'unknown')} at {data.get('price', 0)}"
         elif event_type == AlertEvent.ORDER_FILLED:
-            return f"Buy order filled for {data.get('symbol', 'unknown')} at {data.get('price', 0)}"
+            return f"Buy field activated for {data.get('symbol', 'unknown')} at {data.get('price', 0)}"
         elif event_type == AlertEvent.SELL_ORDER_PLACED:
-            return f"Sell order placed for {data.get('symbol', 'unknown')} at {data.get('price', 0)}"
+            return f"Sell field deployed for {data.get('symbol', 'unknown')} at {data.get('price', 0)}"
         elif event_type == AlertEvent.SELL_ORDER_FILLED:
-            profit = data.get('profit', 0)
-            return f"Sell order filled for {data.get('symbol', 'unknown')} at {data.get('price', 0)} (Profit: {profit}%)"
+            return f"Sell field activated for {data.get('symbol', 'unknown')} at {data.get('price', 0)}"
         elif event_type == AlertEvent.HIGH_VOLATILITY:
             return f"High volatility detected for {data.get('symbol', 'unknown')}: {data.get('volatility', 0)}%"
         elif event_type == AlertEvent.ERROR:

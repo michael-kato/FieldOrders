@@ -5,20 +5,20 @@ import argparse
 import threading
 from PyQt5.QtWidgets import QApplication
 
-from config.settings import EXCHANGES, SCANNER_SETTINGS, ORDER_SETTINGS, GUI_SETTINGS
-from exchange.connector import ExchangeConnector
-from core.scanner import VolatilityScanner
-from core.order import OrderManager
-from utils.logger import setup_logger
-from utils.storage import Storage
-from utils.alerts import AlertManager, AlertEvent
-from gui.dashboard import Dashboard
+from settings import EXCHANGES, SCANNER_SETTINGS, ORDER_SETTINGS, GUI_SETTINGS
+from exchange import ExchangeConnector
+from scanner import VolatilityScanner
+from orders import OrderManager
+from logger import setup_logger
+from storage import Storage
+from alerts import AlertManager, AlertEvent
+from ui import TacticalDashboard
 
 def parse_args():
     parser = argparse.ArgumentParser(description='OrderTools Trading Bot')
     parser.add_argument('--exchange', type=str, default='binance', help='Exchange to use')
     parser.add_argument('--sandbox', action='store_true', help='Use sandbox mode')
-    parser.add_argument('--no-gui', action='store_true', help='Run without GUI')
+    parser.add_argument('--headless', action='store_true', help='Run without GUI')
     parser.add_argument('--simulate', action='store_true', help='Run in simulation mode')
     parser.add_argument('--db-path', type=str, default='data/ordertools.db', help='Database path')
     return parser.parse_args()
@@ -45,7 +45,7 @@ def main():
         
         if args.simulate:
             # Use simulation mode
-            from utils.simulation import Simulator
+            from simulation import Simulator
             simulator = Simulator()
             connector = simulator  # We'll need to adapt the simulator to match connector interface
             logger.info("Running in simulation mode")
@@ -72,13 +72,12 @@ def main():
             tier_percentages=ORDER_SETTINGS.get('tier_percentages', [0.5, 0.3, 0.2])
         )
         
-        # Extend order manager with storage and alerts
-        original_place_fat_finger_buy = order_manager.place_fat_finger_buy
-        original_setup_tiered_sells = order_manager.setup_tiered_sells
-        
         # Override methods to add storage and alerts
-        def place_fat_finger_buy_with_storage(symbol, base_price, position_size):
-            order = original_place_fat_finger_buy(symbol, base_price, position_size)
+        original_place_buy_field = order_manager.place_buy_field
+        original_deploy_sell_field = order_manager.deploy_sell_field
+        
+        def place_buy_field_extended(symbol, base_price, position_size):
+            order = original_place_buy_field(symbol, base_price, position_size)
             
             if order and 'id' in order:
                 # Save to storage
@@ -89,13 +88,14 @@ def main():
                     'order_id': order['id'],
                     'symbol': symbol,
                     'price': base_price * (1 - (order_manager.discount_percentage / 100)),
-                    'amount': position_size / (base_price * (1 - (order_manager.discount_percentage / 100)))
+                    'amount': position_size / (base_price * (1 - (order_manager.discount_percentage / 100))),
+                    'field_type': 'buy'
                 })
             
             return order
         
-        def setup_tiered_sells_with_storage(buy_order_id):
-            sell_orders = original_setup_tiered_sells(buy_order_id)
+        def deploy_sell_field_extended(buy_order_id):
+            sell_orders = original_deploy_sell_field(buy_order_id)
             
             for order in sell_orders:
                 if 'id' in order:
@@ -107,25 +107,26 @@ def main():
                         'order_id': order['id'],
                         'symbol': order_manager.active_orders[order['id']]['symbol'],
                         'price': order_manager.active_orders[order['id']]['price'],
-                        'amount': order_manager.active_orders[order['id']]['amount']
+                        'amount': order_manager.active_orders[order['id']]['amount'],
+                        'field_type': 'sell'
                     })
             
             return sell_orders
         
         # Replace methods
-        order_manager.place_fat_finger_buy = place_fat_finger_buy_with_storage
-        order_manager.setup_tiered_sells = setup_tiered_sells_with_storage
+        order_manager.place_buy_field = place_buy_field_extended
+        order_manager.deploy_sell_field = deploy_sell_field_extended
         
         # Add method to check for filled orders and trigger alerts
-        def check_and_update_orders():
-            """Check order status and trigger alerts for filled orders"""
+        def check_and_update_fields():
+            """Check field status and trigger alerts for activated fields"""
             for order_id, order in list(order_manager.active_orders.items()):
                 # Skip orders we know are already filled
                 if order.get('status') == 'closed':
                     continue
                 
                 # Check current status
-                status = order_manager.check_order_status(order_id)
+                status = order_manager.check_field_status(order_id)
                 
                 # If order is now filled
                 if status and status.get('status') == 'closed':
@@ -142,14 +143,9 @@ def main():
                         'side': order.get('type', ''),
                         'amount': order.get('amount', 0),
                         'price': order.get('price', 0),
-                        'timestamp': int(time.time() * 1000)
+                        'timestamp': int(time.time() * 1000),
+                        'field_type': order.get('field_type', '')
                     }
-                    
-                    # Calculate profit for sell orders
-                    if order.get('type') == 'sell' and 'buy_price' in order:
-                        profit_percent = ((order.get('price', 0) - order.get('buy_price', 0)) / 
-                                         order.get('buy_price', 0)) * 100
-                        trade_data['profit'] = profit_percent
                     
                     storage.save_trade(trade_data)
                     
@@ -159,18 +155,19 @@ def main():
                             'order_id': order_id,
                             'symbol': order.get('symbol', ''),
                             'price': order.get('price', 0),
-                            'amount': order.get('amount', 0)
+                            'amount': order.get('amount', 0),
+                            'field_type': 'buy'
                         })
                         
-                        # Setup sell orders for filled buy orders
-                        order_manager.setup_tiered_sells(order_id)
+                        # Setup sell field for filled buy orders
+                        order_manager.deploy_sell_field(order_id)
                     else:
                         alert_manager.trigger_alert(AlertEvent.SELL_ORDER_FILLED, {
                             'order_id': order_id,
                             'symbol': order.get('symbol', ''),
                             'price': order.get('price', 0),
                             'amount': order.get('amount', 0),
-                            'profit': trade_data.get('profit', 0)
+                            'field_type': 'sell'
                         })
         
         # Add method to scanner to trigger volatility alerts
@@ -192,7 +189,7 @@ def main():
         
         scanner.scan_market = scan_market_with_alerts
         
-        if args.no_gui:
+        if args.headless:
             # CLI mode - run scanner loop
             logger.info("Running in CLI mode")
             
@@ -209,21 +206,21 @@ def main():
                         symbol = pair['symbol']
                         current_price = pair['last_price']
                         
-                        # Place buy order
+                        # Deploy buy field
                         position_size = min(
                             ORDER_SETTINGS.get('max_position_size', 100.0),
                             pair['volume'] * 0.01  # 1% of volume for demonstration
                         )
                         
-                        buy_order = order_manager.place_fat_finger_buy(
+                        buy_order = order_manager.place_buy_field(
                             symbol, current_price, position_size
                         )
                         
                         if buy_order:
-                            logger.info(f"Placed buy order: {buy_order}")
+                            logger.info(f"Deployed buy field: {buy_order}")
                     
-                    # Check for filled orders
-                    check_and_update_orders()
+                    # Check for activated fields
+                    check_and_update_fields()
                     
                     # Sleep before next scan
                     time.sleep(SCANNER_SETTINGS.get('scan_interval', 300))
@@ -250,21 +247,21 @@ def main():
                 'exchange': exchange_settings
             }
             
-            dashboard = Dashboard(scanner, order_manager, settings, storage, alert_manager)
+            dashboard = TacticalDashboard(scanner, order_manager, settings, storage, alert_manager)
             dashboard.show()
             
             # Start background thread for checking filled orders
-            def check_orders_background():
+            def check_fields_background():
                 while True:
                     try:
                         # Only check when scanner is running
                         if dashboard.is_running:
-                            check_and_update_orders()
+                            check_and_update_fields()
                         time.sleep(5)  # Check every 5 seconds
                     except Exception as e:
-                        logger.error(f"Error checking orders: {str(e)}")
+                        logger.error(f"Error checking fields: {str(e)}")
             
-            order_thread = threading.Thread(target=check_orders_background, daemon=True)
+            order_thread = threading.Thread(target=check_fields_background, daemon=True)
             order_thread.start()
             
             sys.exit(app.exec_())

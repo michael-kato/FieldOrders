@@ -1,18 +1,19 @@
 import logging
 from typing import Dict, List, Optional, Tuple
 import time
+import uuid
 
 class OrderManager:
     def __init__(self, connector, discount_percentage: float = 15.0, 
                  profit_tiers: List[float] = [5.0, 10.0, 15.0],
                  tier_percentages: List[float] = [0.5, 0.3, 0.2]):
         """
-        Manages order placement and tracking
+        Manages order fields for trading - orchestrates buy fields and sell fields
         
         Args:
             connector: ExchangeConnector instance
-            discount_percentage: Target discount for buy orders (%)
-            profit_tiers: List of profit percentages for sell orders
+            discount_percentage: Target discount for buy field orders (%)
+            profit_tiers: List of profit percentages for sell field orders
             tier_percentages: Percentage of position to sell at each tier
         """
         self.logger = logging.getLogger(__name__)
@@ -22,10 +23,14 @@ class OrderManager:
         self.tier_percentages = tier_percentages
         self.active_orders = {}
         
-    def place_fat_finger_buy(self, symbol: str, base_price: float, 
-                             position_size: float) -> Dict:
+        # Track buy and sell fields
+        self.buy_field_orders = {}
+        self.sell_field_orders = {}
+        
+    def place_buy_field(self, symbol: str, base_price: float, 
+                       position_size: float) -> Dict:
         """
-        Place a "fat finger" buy order at discounted price
+        Place a buy field order at discounted price
         
         Args:
             symbol: Trading pair symbol
@@ -42,7 +47,7 @@ class OrderManager:
             # Calculate amount to buy (units of base currency)
             amount = position_size / buy_price
             
-            self.logger.info(f"Placing fat finger buy order for {symbol} at {buy_price} " 
+            self.logger.info(f"Deploying buy field for {symbol} at {buy_price} " 
                              f"({self.discount_percentage}% below market)")
             
             # Place buy order
@@ -56,20 +61,25 @@ class OrderManager:
                     'amount': amount,
                     'price': buy_price,
                     'base_price': base_price,
-                    'timestamp': time.time()
+                    'timestamp': time.time(),
+                    'field_type': 'buy'
                 }
+                
+                # Add to buy field tracking
+                self.buy_field_orders[order['id']] = self.active_orders[order['id']]
+                
                 return order
             else:
-                self.logger.error(f"Failed to place buy order for {symbol}")
+                self.logger.error(f"Failed to deploy buy field for {symbol}")
                 return {}
                 
         except Exception as e:
-            self.logger.error(f"Error placing buy order for {symbol}: {str(e)}")
+            self.logger.error(f"Error deploying buy field for {symbol}: {str(e)}")
             return {}
             
-    def setup_tiered_sells(self, buy_order_id: str) -> List[Dict]:
+    def deploy_sell_field(self, buy_order_id: str) -> List[Dict]:
         """
-        Set up tiered sell orders once a buy order is filled
+        Deploy a sell field once a buy order is filled
         
         Args:
             buy_order_id: ID of the filled buy order
@@ -93,18 +103,18 @@ class OrderManager:
             
             # If order is not filled, return empty list
             if order_status.get('status') != 'closed':
-                self.logger.info(f"Buy order {buy_order_id} not yet filled")
+                self.logger.info(f"Buy field {buy_order_id} not yet triggered")
                 return []
                 
             sell_orders = []
             
-            # Place tiered sell orders
+            # Deploy tiered sell field orders
             for i, (profit, percentage) in enumerate(zip(self.profit_tiers, self.tier_percentages)):
                 # Calculate sell price and amount
                 sell_price = buy_price * (1 + (profit / 100))
                 sell_amount = total_amount * percentage
                 
-                self.logger.info(f"Placing tier {i+1} sell order for {symbol} at {sell_price} "
+                self.logger.info(f"Deploying sell field tier {i+1} for {symbol} at {sell_price} "
                                  f"({profit}% profit, {percentage*100}% of position)")
                 
                 # Place sell order
@@ -121,22 +131,26 @@ class OrderManager:
                         'profit_percentage': profit,
                         'tier': i+1,
                         'related_buy': buy_order_id,
-                        'timestamp': time.time()
+                        'timestamp': time.time(),
+                        'field_type': 'sell'
                     }
+                    
+                    # Add to sell field tracking
+                    self.sell_field_orders[sell_order['id']] = self.active_orders[sell_order['id']]
                     
                     sell_orders.append(sell_order)
                 else:
-                    self.logger.error(f"Failed to place sell order for {symbol}")
+                    self.logger.error(f"Failed to deploy sell field for {symbol}")
             
             return sell_orders
             
         except Exception as e:
-            self.logger.error(f"Error setting up sell orders: {str(e)}")
+            self.logger.error(f"Error deploying sell field: {str(e)}")
             return []
             
-    def check_order_status(self, order_id: str) -> Dict:
+    def check_field_status(self, order_id: str) -> Dict:
         """
-        Check status of an order
+        Check status of a field order
         
         Args:
             order_id: Order ID to check
@@ -146,7 +160,7 @@ class OrderManager:
         """
         try:
             if order_id not in self.active_orders:
-                self.logger.error(f"Order {order_id} not found")
+                self.logger.error(f"Order {order_id} not found in field")
                 return {}
                 
             order = self.active_orders[order_id]
@@ -166,5 +180,53 @@ class OrderManager:
             return status
             
         except Exception as e:
-            self.logger.error(f"Error checking order status: {str(e)}")
+            self.logger.error(f"Error checking field status: {str(e)}")
+            return {}
+            
+    def get_buy_field_orders(self) -> Dict:
+        """Get all active buy field orders"""
+        return self.buy_field_orders
+        
+    def get_sell_field_orders(self) -> Dict:
+        """Get all active sell field orders"""
+        return self.sell_field_orders
+        
+    def retract_field(self, order_id: str) -> Dict:
+        """
+        Retract (cancel) an order from the field
+        
+        Args:
+            order_id: Order ID to cancel
+            
+        Returns:
+            Cancellation result
+        """
+        try:
+            if order_id not in self.active_orders:
+                self.logger.error(f"Order {order_id} not found in field")
+                return {}
+                
+            order = self.active_orders[order_id]
+            symbol = order['symbol']
+            
+            # Cancel order
+            result = self.connector.cancel_order(order_id, symbol)
+            
+            # Update status if successful
+            if result:
+                self.active_orders[order_id]['status'] = 'canceled'
+                
+                # Remove from appropriate field tracking
+                field_type = order.get('field_type')
+                if field_type == 'buy':
+                    if order_id in self.buy_field_orders:
+                        del self.buy_field_orders[order_id]
+                elif field_type == 'sell':
+                    if order_id in self.sell_field_orders:
+                        del self.sell_field_orders[order_id]
+                        
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error retracting field order: {str(e)}")
             return {}

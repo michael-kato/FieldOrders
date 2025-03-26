@@ -1,6 +1,6 @@
-# OrderTools Trading Bot
+# FieldOrders trading tools
 
-A cryptocurrency trading tool that autonomously identifies volatile pairs, places strategic buy orders at discount prices, and manages profitable exits through tiered sell orders.
+A crypto trading tool that autonomously identifies volatile pairs, places strategic buy orders at discount prices, and manages profitable exits through tiered sell orders.
 
 ## Features
 
@@ -17,8 +17,8 @@ A cryptocurrency trading tool that autonomously identifies volatile pairs, place
 
 1. Clone the repository:
    ```
-   git clone https://github.com/yourusername/ordertools.git
-   cd ordertools
+   git clone https://github.com/yourusername/FieldOrders.git
+   cd FieldOrders
    ```
 
 2. Install dependencies:
@@ -53,7 +53,7 @@ python main.py --simulate
 Run in command line mode without GUI:
 
 ```
-python main.py --no-gui
+python main.py --headless
 ```
 
 ### Use Specific Exchange

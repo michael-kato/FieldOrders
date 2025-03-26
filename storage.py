@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 class Storage:
     def __init__(self, db_path: str = "data/ordertools.db"):
         """
-        Persistent storage for trade history and settings
+        Persistent storage for field history and settings
         
         Args:
             db_path: Path to SQLite database file
@@ -38,6 +38,7 @@ class Storage:
                 price REAL NOT NULL,
                 status TEXT NOT NULL,
                 timestamp INTEGER NOT NULL,
+                field_type TEXT NOT NULL,
                 metadata TEXT
             )
             ''')
@@ -52,7 +53,7 @@ class Storage:
                 amount REAL NOT NULL,
                 price REAL NOT NULL,
                 timestamp INTEGER NOT NULL,
-                profit REAL,
+                field_type TEXT NOT NULL,
                 FOREIGN KEY (order_id) REFERENCES orders(id)
             )
             ''')
@@ -107,63 +108,27 @@ class Storage:
             price = order_data.get('price', 0.0)
             status = order_data.get('status', 'unknown')
             timestamp = order_data.get('timestamp', 0)
+            field_type = order_data.get('field_type', 'unknown')
             
             # Store remaining data as JSON
             metadata = json.dumps({k: v for k, v in order_data.items() 
-                                if k not in ['symbol', 'type', 'amount', 'price', 'status', 'timestamp']})
+                                if k not in ['symbol', 'type', 'amount', 'price', 
+                                           'status', 'timestamp', 'field_type']})
             
             cursor.execute('''
             INSERT OR REPLACE INTO orders 
-            (id, symbol, type, amount, price, status, timestamp, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (order_id, symbol, order_type, amount, price, status, timestamp, metadata))
+            (id, symbol, type, amount, price, status, timestamp, field_type, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (order_id, symbol, order_type, amount, price, status, timestamp, field_type, metadata))
             
             conn.commit()
             conn.close()
             
-            self.logger.info(f"Order {order_id} saved to database")
+            self.logger.info(f"Field order {order_id} saved to database")
             return True
             
         except Exception as e:
-            self.logger.error(f"Error saving order to database: {str(e)}")
-            return False
-    
-    def save_trade(self, trade_data: Dict) -> bool:
-        """
-        Save executed trade to database
-        
-        Args:
-            trade_data: Trade data dictionary
-            
-        Returns:
-            Success status
-        """
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            order_id = trade_data.get('order_id', '')
-            symbol = trade_data.get('symbol', '')
-            side = trade_data.get('side', '')
-            amount = trade_data.get('amount', 0.0)
-            price = trade_data.get('price', 0.0)
-            timestamp = trade_data.get('timestamp', 0)
-            profit = trade_data.get('profit', None)
-            
-            cursor.execute('''
-            INSERT INTO trades 
-            (order_id, symbol, side, amount, price, timestamp, profit)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (order_id, symbol, side, amount, price, timestamp, profit))
-            
-            conn.commit()
-            conn.close()
-            
-            self.logger.info(f"Trade for order {order_id} saved to database")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Error saving trade to database: {str(e)}")
+            self.logger.error(f"Error saving field activation: {str(e)}")
             return False
     
     def save_volatility(self, volatility_data: Dict) -> bool:
@@ -201,7 +166,8 @@ class Storage:
             return False
     
     def get_orders(self, status: Optional[str] = None, 
-                   symbol: Optional[str] = None, 
+                   symbol: Optional[str] = None,
+                   field_type: Optional[str] = None,
                    limit: int = 100) -> List[Dict]:
         """
         Get orders from database with optional filtering
@@ -209,6 +175,7 @@ class Storage:
         Args:
             status: Filter by order status
             symbol: Filter by symbol
+            field_type: Filter by field type (buy/sell)
             limit: Maximum number of orders to return
             
         Returns:
@@ -223,19 +190,22 @@ class Storage:
             params = []
             
             # Add filters
-            if status or symbol:
-                query += " WHERE"
+            filter_conditions = []
+            
+            if status:
+                filter_conditions.append("status = ?")
+                params.append(status)
+            
+            if symbol:
+                filter_conditions.append("symbol = ?")
+                params.append(symbol)
                 
-                if status:
-                    query += " status = ?"
-                    params.append(status)
-                    
-                    if symbol:
-                        query += " AND"
-                
-                if symbol:
-                    query += " symbol = ?"
-                    params.append(symbol)
+            if field_type:
+                filter_conditions.append("field_type = ?")
+                params.append(field_type)
+            
+            if filter_conditions:
+                query += " WHERE " + " AND ".join(filter_conditions)
             
             # Add limit and order by
             query += " ORDER BY timestamp DESC LIMIT ?"
@@ -260,11 +230,12 @@ class Storage:
             return orders
             
         except Exception as e:
-            self.logger.error(f"Error getting orders from database: {str(e)}")
+            self.logger.error(f"Error getting field orders from database: {str(e)}")
             return []
     
     def get_trades(self, symbol: Optional[str] = None, 
-                   order_id: Optional[str] = None, 
+                   order_id: Optional[str] = None,
+                   field_type: Optional[str] = None,
                    limit: int = 100) -> List[Dict]:
         """
         Get trades from database with optional filtering
@@ -272,6 +243,7 @@ class Storage:
         Args:
             symbol: Filter by symbol
             order_id: Filter by order ID
+            field_type: Filter by field type (buy/sell)
             limit: Maximum number of trades to return
             
         Returns:
@@ -286,19 +258,22 @@ class Storage:
             params = []
             
             # Add filters
-            if symbol or order_id:
-                query += " WHERE"
+            filter_conditions = []
+            
+            if symbol:
+                filter_conditions.append("symbol = ?")
+                params.append(symbol)
+            
+            if order_id:
+                filter_conditions.append("order_id = ?")
+                params.append(order_id)
                 
-                if symbol:
-                    query += " symbol = ?"
-                    params.append(symbol)
-                    
-                    if order_id:
-                        query += " AND"
-                
-                if order_id:
-                    query += " order_id = ?"
-                    params.append(order_id)
+            if field_type:
+                filter_conditions.append("field_type = ?")
+                params.append(field_type)
+            
+            if filter_conditions:
+                query += " WHERE " + " AND ".join(filter_conditions)
             
             # Add limit and order by
             query += " ORDER BY timestamp DESC LIMIT ?"
@@ -313,7 +288,7 @@ class Storage:
             return trades
             
         except Exception as e:
-            self.logger.error(f"Error getting trades from database: {str(e)}")
+            self.logger.error(f"Error getting field activations from database: {str(e)}")
             return []
     
     def get_volatility_history(self, symbol: Optional[str] = None,
@@ -339,25 +314,20 @@ class Storage:
             params = []
             
             # Add filters
-            filters_added = False
+            filter_conditions = []
             
             if symbol:
-                query += " WHERE symbol = ?"
+                filter_conditions.append("symbol = ?")
                 params.append(symbol)
-                filters_added = True
             
             if period:
                 # Calculate timestamp for period start
                 period_start = int((datetime.now() - timedelta(hours=period)).timestamp() * 1000)
-                
-                if filters_added:
-                    query += " AND"
-                else:
-                    query += " WHERE"
-                    filters_added = True
-                
-                query += " timestamp >= ?"
+                filter_conditions.append("timestamp >= ?")
                 params.append(period_start)
+            
+            if filter_conditions:
+                query += " WHERE " + " AND ".join(filter_conditions)
             
             # Add limit and order by
             query += " ORDER BY timestamp DESC LIMIT ?"
@@ -433,237 +403,11 @@ class Storage:
             self.logger.error(f"Error getting setting: {str(e)}")
             return default
     
-    def get_profit_stats(self, 
-                        symbol: Optional[str] = None, 
-                        start_time: Optional[int] = None, 
-                        end_time: Optional[int] = None) -> Dict:
-        """
-        Get profit statistics
-        
-        Args:
-            symbol: Filter by symbol
-            start_time: Filter by start timestamp
-            end_time: Filter by end timestamp
-            
-        Returns:
-            Dictionary with profit statistics
-        """
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            query = "SELECT SUM(profit) as total_profit, AVG(profit) as avg_profit, " \
-                   "COUNT(*) as total_trades, symbol FROM trades WHERE profit IS NOT NULL"
-            params = []
-            
-            # Add filters
-            if symbol or start_time or end_time:
-                if symbol:
-                    query += " AND symbol = ?"
-                    params.append(symbol)
-                
-                if start_time:
-                    query += " AND timestamp >= ?"
-                    params.append(start_time)
-                
-                if end_time:
-                    query += " AND timestamp <= ?"
-                    params.append(end_time)
-            
-            # Add group by
-            query += " GROUP BY symbol"
-            
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            
-            stats = {}
-            for row in rows:
-                total_profit, avg_profit, total_trades, symbol = row
-                stats[symbol] = {
-                    'total_profit': total_profit,
-                    'avg_profit': avg_profit,
-                    'total_trades': total_trades
-                }
-            
-            conn.close()
-            return stats
-            
-        except Exception as e:
-            self.logger.error(f"Error getting profit statistics: {str(e)}")
-            return {}
-    
-    def get_daily_stats(self, days: int = 7) -> Dict:
-        """
-        Get daily trading statistics
-        
-        Args:
-            days: Number of days to include
-            
-        Returns:
-            Dictionary with daily statistics
-        """
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Calculate timestamp for days ago
-            days_ago = int((datetime.now() - timedelta(days=days)).timestamp() * 1000)
-            
-            # Get daily profit
-            cursor.execute('''
-            SELECT 
-                date(datetime(timestamp/1000, 'unixepoch')) as trade_date,
-                SUM(profit) as daily_profit,
-                COUNT(*) as num_trades,
-                AVG(profit) as avg_profit
-            FROM trades
-            WHERE timestamp >= ? AND profit IS NOT NULL
-            GROUP BY trade_date
-            ORDER BY trade_date DESC
-            ''', (days_ago,))
-            
-            daily_stats = {}
-            for row in cursor.fetchall():
-                trade_date, daily_profit, num_trades, avg_profit = row
-                daily_stats[trade_date] = {
-                    'profit': daily_profit,
-                    'trades': num_trades,
-                    'avg_profit': avg_profit
-                }
-            
-            # Get daily order counts
-            cursor.execute('''
-            SELECT 
-                date(datetime(timestamp/1000, 'unixepoch')) as order_date,
-                COUNT(*) as num_orders,
-                COUNT(CASE WHEN type = 'buy' THEN 1 END) as buy_orders,
-                COUNT(CASE WHEN type = 'sell' THEN 1 END) as sell_orders
-            FROM orders
-            WHERE timestamp >= ?
-            GROUP BY order_date
-            ORDER BY order_date DESC
-            ''', (days_ago,))
-            
-            for row in cursor.fetchall():
-                order_date, num_orders, buy_orders, sell_orders = row
-                if order_date in daily_stats:
-                    daily_stats[order_date].update({
-                        'orders': num_orders,
-                        'buy_orders': buy_orders,
-                        'sell_orders': sell_orders
-                    })
-                else:
-                    daily_stats[order_date] = {
-                        'profit': 0,
-                        'trades': 0,
-                        'avg_profit': 0,
-                        'orders': num_orders,
-                        'buy_orders': buy_orders,
-                        'sell_orders': sell_orders
-                    }
-            
-            conn.close()
-            return daily_stats
-            
-        except Exception as e:
-            self.logger.error(f"Error getting daily statistics: {str(e)}")
-            return {}
-    
-    def get_symbol_performance(self, top_n: int = 5) -> Dict:
-        """
-        Get performance statistics by symbol
-        
-        Args:
-            top_n: Number of top performers to return
-            
-        Returns:
-            Dictionary with symbol performance statistics
-        """
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Get profit by symbol
-            cursor.execute('''
-            SELECT 
-                symbol,
-                SUM(profit) as total_profit,
-                COUNT(*) as num_trades,
-                AVG(profit) as avg_profit,
-                MIN(profit) as min_profit,
-                MAX(profit) as max_profit
-            FROM trades
-            WHERE profit IS NOT NULL
-            GROUP BY symbol
-            ORDER BY total_profit DESC
-            LIMIT ?
-            ''', (top_n,))
-            
-            symbol_stats = {}
-            for row in cursor.fetchall():
-                symbol, total_profit, num_trades, avg_profit, min_profit, max_profit = row
-                symbol_stats[symbol] = {
-                    'total_profit': total_profit,
-                    'num_trades': num_trades,
-                    'avg_profit': avg_profit,
-                    'min_profit': min_profit,
-                    'max_profit': max_profit
-                }
-            
-            conn.close()
-            return symbol_stats
-            
-        except Exception as e:
-            self.logger.error(f"Error getting symbol performance: {str(e)}")
-            return {}
-    
-    def get_volatility_stats(self, symbol: Optional[str] = None, 
-                           period: int = 24) -> Dict:
-        """
-        Get volatility statistics
-        
-        Args:
-            symbol: Filter by symbol
-            period: Time period in hours
-            
-        Returns:
-            Dictionary with volatility statistics
-        """
-        try:
-            volatility_data = self.get_volatility_history(symbol, period)
-            
-            if not volatility_data:
-                return {}
-            
-            # Group by symbol
-            by_symbol = {}
-            for data in volatility_data:
-                sym = data['symbol']
-                if sym not in by_symbol:
-                    by_symbol[sym] = []
-                by_symbol[sym].append(data['volatility'])
-            
-            # Calculate statistics
-            stats = {}
-            for sym, values in by_symbol.items():
-                stats[sym] = {
-                    'avg_volatility': sum(values) / len(values),
-                    'max_volatility': max(values),
-                    'min_volatility': min(values),
-                    'num_samples': len(values)
-                }
-            
-            return stats
-            
-        except Exception as e:
-            self.logger.error(f"Error getting volatility statistics: {str(e)}")
-            return {}
-    
     def export_trades_csv(self, filepath: str, 
                          start_time: Optional[int] = None,
                          end_time: Optional[int] = None) -> bool:
         """
-        Export trades to CSV file
+        Export field activations to CSV file
         
         Args:
             filepath: Path to save CSV file
@@ -681,19 +425,18 @@ class Storage:
             params = []
             
             # Add filters
-            if start_time or end_time:
-                query += " WHERE"
-                
-                if start_time:
-                    query += " timestamp >= ?"
-                    params.append(start_time)
-                    
-                    if end_time:
-                        query += " AND"
-                
-                if end_time:
-                    query += " timestamp <= ?"
-                    params.append(end_time)
+            filter_conditions = []
+            
+            if start_time:
+                filter_conditions.append("timestamp >= ?")
+                params.append(start_time)
+            
+            if end_time:
+                filter_conditions.append("timestamp <= ?")
+                params.append(end_time)
+            
+            if filter_conditions:
+                query += " WHERE " + " AND ".join(filter_conditions)
             
             # Order by timestamp
             query += " ORDER BY timestamp"
@@ -720,7 +463,7 @@ class Storage:
             return True
             
         except Exception as e:
-            self.logger.error(f"Error exporting trades to CSV: {str(e)}")
+            self.logger.error(f"Error exporting field activations to CSV: {str(e)}")
             return False
     
     def backup_database(self, backup_path: Optional[str] = None) -> bool:
@@ -789,3 +532,36 @@ class Storage:
         except Exception as e:
             self.logger.error(f"Error cleaning old data: {str(e)}")
             return False
+            
+    
+    def save_trade(self, trade_data: Dict) -> bool:
+        """
+        Save executed trade to database
+        
+        Args:
+            trade_data: Trade data dictionary
+            
+        Returns:
+            Success status
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        order_id = trade_data.get('order_id', '')
+        symbol = trade_data.get('symbol', '')
+        side = trade_data.get('side', '')
+        amount = trade_data.get('amount', 0.0)
+        price = trade_data.get('price', 0.0)
+        timestamp = trade_data.get('timestamp', 0)
+        field_type = trade_data.get('field_type', 'unknown')
+        
+        cursor.execute('''
+        INSERT INTO trades 
+        (order_id, symbol, side, amount, price, timestamp, field_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (order_id, symbol, side, amount, price, timestamp, field_type))
+        
+        conn.commit()
+        conn.close()
+        
+        self.logger.info(f"Field activation for order {order_id} saved to database")
