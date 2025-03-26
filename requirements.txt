@@ -1,5 +1,0 @@
-ccxt
-numpy
-pandas
-PyQt5
-PyQtChart
